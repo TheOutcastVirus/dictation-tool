@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Dictation daemon — hold Right Alt to record, release to transcribe and paste.
-Works on Wayland via evdev + wl-copy + ydotool.
+Works on Wayland via evdev + wl-copy + uinput Ctrl+V.
 """
 
 import subprocess
@@ -23,6 +23,7 @@ MIN_DURATION = 0.3  # seconds; ignore accidental taps shorter than this
 indicator = Indicator()
 recorder = Recorder()
 transcriber: Transcriber | None = None  # loaded in background thread
+_uinput: evdev.UInput | None = None     # created once at startup
 
 _press_time: float = 0.0
 _recording = False
@@ -30,14 +31,25 @@ _lock = threading.Lock()
 
 
 def _paste(text: str):
-    """Type text directly at the cursor via ydotool."""
-    subprocess.run(["ydotool", "type", "--", text], check=False)
+    """Copy text to clipboard via wl-copy, then inject Ctrl+V via uinput."""
+    proc = subprocess.Popen(["wl-copy"], stdin=subprocess.PIPE)
+    proc.communicate(input=text.encode())
+    time.sleep(0.1)
+
+    _uinput.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 1)
+    _uinput.syn()
+    _uinput.write(ecodes.EV_KEY, ecodes.KEY_V, 1)
+    _uinput.syn()
+    _uinput.write(ecodes.EV_KEY, ecodes.KEY_V, 0)
+    _uinput.syn()
+    _uinput.write(ecodes.EV_KEY, ecodes.KEY_LEFTCTRL, 0)
+    _uinput.syn()
 
 
-VIRTUAL_NAME_FRAGMENTS = ("virtual", "ydotool", "uinput")
+VIRTUAL_NAME_FRAGMENTS = ("virtual", "ydotool", "uinput", "dictation")
 
 def _find_keyboards():
-    """Return physical keyboard evdev devices (skip virtual/ydotool ones)."""
+    """Return physical keyboard evdev devices (skip virtual ones)."""
     devices = []
     for path in evdev.list_devices():
         try:
@@ -107,7 +119,15 @@ def _load_model():
 
 
 def main():
+    global _uinput
+
     indicator.start()
+
+    # Create UInput device once at startup so the compositor has time to register it
+    # No capability filter — full keyboard so GNOME treats it as trusted
+    _uinput = evdev.UInput(name="dictation-paste")
+    time.sleep(1)  # give compositor time to register the device
+    print("UInput device ready.", flush=True)
 
     threading.Thread(target=_load_model, daemon=True).start()
 
@@ -123,9 +143,12 @@ def main():
         threading.Thread(target=_listen_device, args=(dev,), daemon=True).start()
 
     try:
-        indicator.mainloop()
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
         pass
+    finally:
+        _uinput.close()
 
 
 if __name__ == "__main__":
