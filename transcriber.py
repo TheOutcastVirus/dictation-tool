@@ -1,7 +1,7 @@
 import numpy as np
 from faster_whisper import WhisperModel
 
-MODEL_SIZE = "small.en"
+MODEL_SIZE = "base.en"
 
 
 class Transcriber:
