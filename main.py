@@ -17,7 +17,8 @@ from transcriber import Transcriber
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 HOTKEY_CODE = ecodes.KEY_RIGHTALT
-MIN_DURATION = 0.3  # seconds; ignore accidental taps shorter than this
+MIN_DURATION = 0.3          # seconds; ignore accidental taps shorter than this
+VIRTUAL_NAME_FRAGMENTS = ("virtual", "ydotool", "uinput")
 # ───────────────────────────────────────────────────────────────────────────────
 
 indicator = Indicator()
@@ -33,8 +34,6 @@ def _paste(text: str):
     """Type text directly at the cursor via ydotool."""
     subprocess.run(["ydotool", "type", "--", text], check=False)
 
-
-VIRTUAL_NAME_FRAGMENTS = ("virtual", "ydotool", "uinput")
 
 def _find_keyboards():
     """Return physical keyboard evdev devices (skip virtual/ydotool ones)."""

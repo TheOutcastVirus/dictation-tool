@@ -3,7 +3,8 @@ Description=Dictation hotkey daemon
 
 [Service]
 ExecStartPre=/usr/bin/ydotoold
-ExecStart=/usr/bin/python3 /home/vkommera/Documents/Projects/dictation/main.py
+ExecStart=/usr/bin/python3 %h/Documents/Projects/dictation/main.py
+WorkingDirectory=%h/Documents/Projects/dictation
 Restart=on-failure
 Environment=WAYLAND_DISPLAY=wayland-0
 Environment=XDG_RUNTIME_DIR=/run/user/1000
