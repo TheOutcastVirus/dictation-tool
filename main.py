@@ -102,6 +102,8 @@ def _listen_device(dev: evdev.InputDevice):
 def _load_model():
     global transcriber
     transcriber = Transcriber()
+    # Prime ydotool so the first real paste doesn't fail due to daemon connection setup
+    subprocess.run(["ydotool", "type", "--", ""], check=False)
     print("Ready. Hold Right Alt to dictate.", flush=True)
 
 
