@@ -31,8 +31,8 @@ _lock = threading.Lock()
 
 
 def _paste(text: str):
-    """Type text directly at the cursor via ydotool."""
-    subprocess.run(["ydotool", "type", "--", text], check=False)
+    """Type text at the cursor via ydotool with no inter-key delay."""
+    subprocess.run(["ydotool", "type", "--key-delay", "0", "--", text], check=False)
 
 
 def _find_keyboards():
