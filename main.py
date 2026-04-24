@@ -11,6 +11,7 @@ import time
 import evdev
 from evdev import ecodes
 
+import logger
 from indicator import Indicator
 from recorder import Recorder
 from transcriber import Transcriber
@@ -86,11 +87,14 @@ def _listen_device(dev: evdev.InputDevice):
                     print(f"Too short ({duration:.2f}s), ignoring.", flush=True)
                     continue
 
-                def transcribe_and_paste(audio=audio):
+                def transcribe_and_paste(audio=audio, audio_duration=duration):
                     print("Transcribing...", flush=True)
+                    t0 = time.monotonic()
                     text = transcriber.transcribe(audio)
-                    print(f"Result: {text!r}", flush=True)
+                    transcribe_ms = round((time.monotonic() - t0) * 1000)
+                    print(f"Result: {text!r} ({audio_duration:.1f}s audio, {transcribe_ms}ms)", flush=True)
                     if text:
+                        logger.log(text, audio_duration, transcribe_ms)
                         _paste(text)
 
                 threading.Thread(target=transcribe_and_paste, daemon=True).start()
