@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
 Dictation daemon — hold Right Alt to record, release to transcribe and paste.
-Works on Wayland via evdev + wl-copy + ydotool.
+Works on Wayland via evdev + uinput.
 """
 
-import subprocess
 import threading
 import time
 
@@ -15,25 +14,22 @@ import logger
 from indicator import Indicator
 from recorder import Recorder
 from transcriber import Transcriber
+from typer import Typer
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 HOTKEY_CODE = ecodes.KEY_RIGHTALT
 MIN_DURATION = 0.3          # seconds; ignore accidental taps shorter than this
-VIRTUAL_NAME_FRAGMENTS = ("virtual", "ydotool", "uinput")
+VIRTUAL_NAME_FRAGMENTS = ("virtual", "uinput", "dictation-uinput")
 # ───────────────────────────────────────────────────────────────────────────────
 
 indicator = Indicator()
 recorder = Recorder()
-transcriber: Transcriber | None = None  # loaded in background thread
+transcriber: Transcriber | None = None
+typer: Typer | None = None
 
 _press_time: float = 0.0
 _recording = False
 _lock = threading.Lock()
-
-
-def _paste(text: str):
-    """Type text at the cursor via ydotool with no inter-key delay."""
-    subprocess.run(["ydotool", "type", "--key-delay", "0", "--", text], check=False)
 
 
 def _find_keyboards():
@@ -66,7 +62,7 @@ def _listen_device(dev: evdev.InputDevice):
                 with _lock:
                     if _recording:
                         continue
-                    if transcriber is None:
+                    if transcriber is None or typer is None:
                         print("Model not ready yet, please wait...", flush=True)
                         continue
                     _recording = True
@@ -95,7 +91,7 @@ def _listen_device(dev: evdev.InputDevice):
                     print(f"Result: {text!r} ({audio_duration:.1f}s audio, {transcribe_ms}ms)", flush=True)
                     if text:
                         logger.log(text, audio_duration, transcribe_ms)
-                        _paste(text)
+                        typer.type(text)
 
                 threading.Thread(target=transcribe_and_paste, daemon=True).start()
 
@@ -104,10 +100,9 @@ def _listen_device(dev: evdev.InputDevice):
 
 
 def _load_model():
-    global transcriber
+    global transcriber, typer
     transcriber = Transcriber()
-    # Prime ydotool so the first real paste doesn't fail due to daemon connection setup
-    subprocess.run(["ydotool", "type", "--", ""], check=False)
+    typer = Typer()
     print("Ready. Hold Right Alt to dictate.", flush=True)
 
 
