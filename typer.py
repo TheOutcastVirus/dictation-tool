@@ -71,6 +71,8 @@ _NORMALIZE = str.maketrans({
 # corruption reappears (e.g. "Hello" -> "hEllo", "?" -> "/"), bump
 # _MODIFIER_SETTLE_S first; that one races the xkbcommon state update and
 # was the parameter that demonstrably broke at 2 ms in earlier testing.
+# Pushing _KEY_HOLD_S or _INTER_CHAR_S below 1 ms causes dropped/duplicated
+# characters in some apps.
 _MODIFIER_SETTLE_S = 0.003
 _KEY_HOLD_S = 0.001
 _INTER_CHAR_S = 0.001

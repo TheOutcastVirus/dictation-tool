@@ -13,6 +13,11 @@ import numpy as np
 
 _DIR = os.path.dirname(os.path.abspath(__file__))
 _SERVER = os.path.join(_DIR, "whisper.cpp", "build", "bin", "whisper-server")
+_SERVER_LIBS = [
+    os.path.join(_DIR, "whisper.cpp", "build", "src"),
+    os.path.join(_DIR, "whisper.cpp", "build", "ggml", "src"),
+    os.path.join(_DIR, "whisper.cpp", "build", "ggml", "src", "ggml-hip"),
+]
 _MODEL = os.path.join(_DIR, "whisper.cpp", "models", "ggml-medium.en.bin")
 _HOST = "127.0.0.1"
 _PORT = 8178
@@ -48,24 +53,32 @@ class Transcriber:
                 print(f"ERROR: {label} not found at {path}", file=sys.stderr)
                 sys.exit(1)
 
+        env = os.environ.copy()
+        env["LD_LIBRARY_PATH"] = ":".join(_SERVER_LIBS) + ":" + env.get("LD_LIBRARY_PATH", "")
         self._proc = subprocess.Popen(
             [_SERVER, "-m", _MODEL, "-l", "en", "--host", _HOST, "--port", str(_PORT)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=env,
         )
         atexit.register(self._proc.terminate)
         self._wait_ready()
         print("Whisper server ready (model in VRAM).")
 
-    def _wait_ready(self):
-        for _ in range(60):
+    def _wait_ready(self, timeout_s: int = 180):
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if self._proc.poll() is not None:
+                print("ERROR: whisper-server exited unexpectedly", file=sys.stderr)
+                sys.exit(1)
             try:
                 conn = http.client.HTTPConnection(_HOST, _PORT, timeout=1)
                 conn.request("GET", "/health")
                 if conn.getresponse().status == 200:
                     return
             except Exception:
-                time.sleep(0.5)
+                pass
+            time.sleep(1)
         print("ERROR: whisper-server did not start in time", file=sys.stderr)
         sys.exit(1)
 
