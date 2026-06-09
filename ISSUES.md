@@ -16,7 +16,11 @@
 ## Issue 1 — Keystroke injection races causing capitalization/punctuation corruption
 
 **Severity:** High  
-**Status:** Partially mitigated, not fully resolved  
+**Status:** Resolved — primary path now uses Mutter RemoteDesktop keysym
+injection (`org.gnome.Mutter.RemoteDesktop` D-Bus API). Mutter resolves each
+keysym to keycode + modifiers on its own input thread, so the race cannot
+occur by construction. The racy uinput path remains only as a fallback for
+non-GNOME compositors, where the description below still applies.  
 **File:** `typer.py`
 
 ### Description
@@ -76,7 +80,8 @@ hold one MIME type at a time without a persistent clipboard manager in the loop.
 ## Issue 2 — No clipboard save/restore for paste approach
 
 **Severity:** Medium (blocks clipboard-paste fix above)  
-**Status:** Open
+**Status:** Obsolete — the clipboard-paste approach was dropped in favour of
+keysym injection (see Issue 1), which does not touch the clipboard.
 
 ### Description
 
@@ -92,7 +97,10 @@ daemon (e.g. `cliphist`, `wl-clip-persist`) to already be running.
 ## Issue 3 — Unknown / unsupported Unicode characters are silently dropped
 
 **Severity:** Medium  
-**File:** `typer.py:93–94`
+**Status:** Resolved for the primary path — keysym injection supports
+arbitrary Unicode via the `0x01000000 + codepoint` convention. The uinput
+fallback still drops unmappable characters but now logs them.  
+**File:** `typer.py`
 
 ### Description
 
@@ -166,9 +174,9 @@ never replaced.
 
 ## Proposed Priority Order
 
-1. **Clipboard paste + save/restore** — eliminates Issue 1 entirely for plain-text
-   clipboard, which is the common case. Track MIME type before overwriting.
-2. **Dropped-character logging** — low effort, makes Issue 3 visible immediately.
+1. ~~Clipboard paste + save/restore~~ — superseded: Issues 1–3 addressed by
+   Mutter RemoteDesktop keysym injection instead (no clipboard involvement).
+2. ~~Dropped-character logging~~ — done in the uinput fallback path.
 3. **Transcriber watchdog** — prevents silent failures after GPU OOM or server
    crash (Issue 4).
 4. **Recorder cleanup on device loss** — defensive fix for Issue 5.
