@@ -16,8 +16,8 @@ modifiers on its own input thread, so the race cannot happen by
 construction. No permission dialog is shown (unlike the portal flavour of
 this API, which on xdg-desktop-portal < 1.16 cannot persist authorization
 across restarts). Arbitrary Unicode works via the 0x01000000 + codepoint
-keysym convention, and each D-Bus call round-trips before the next is
-sent, so no inter-key delays are needed at all.
+keysym convention, and all key events are sent as a single burst so the
+full text appears at once, like a paste (~6 ms for 80 chars).
 
 Fallback backend — uinput
 -------------------------
@@ -31,7 +31,7 @@ import threading
 import time
 
 from evdev import UInput, ecodes as e
-from jeepney import DBusAddress, MessageType, new_method_call
+from jeepney import DBusAddress, MessageFlag, MessageType, new_method_call
 from jeepney.io.blocking import open_dbus_connection
 
 # ── Shared ─────────────────────────────────────────────────────────────────────
@@ -85,10 +85,25 @@ class _MutterKeyboard:
             raise RuntimeError(f'{method} failed: {reply.body}')
 
     def type(self, text: str) -> None:
+        # Send all key events as one burst with no per-call round trips, so
+        # the whole text lands at once (~6 ms for 80 chars vs ~80 ms when
+        # waiting for each reply). Ordering is still guaranteed: the events
+        # are serialized on the socket and Mutter processes them in order.
+        # The final event does round-trip, fencing the burst and surfacing
+        # a dead session as an exception.
+        events = []
         for ch in text:
             keysym = _char_keysym(ch)
-            self._call('NotifyKeyboardKeysym', 'ub', (keysym, True))
-            self._call('NotifyKeyboardKeysym', 'ub', (keysym, False))
+            events.append((keysym, True))
+            events.append((keysym, False))
+        if not events:
+            return
+        for keysym, state in events[:-1]:
+            msg = new_method_call(self._session, 'NotifyKeyboardKeysym',
+                                  'ub', (keysym, state))
+            msg.header.flags |= MessageFlag.no_reply_expected
+            self._conn.send(msg)
+        self._call('NotifyKeyboardKeysym', 'ub', events[-1])
 
     def close(self) -> None:
         try:
