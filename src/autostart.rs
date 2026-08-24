@@ -3,6 +3,25 @@ use std::process::Command;
 
 const UNIT_NAME: &str = "dictation-tool.service";
 
+/// Environment the login copy has to be started with to match this one.
+///
+/// ROCm selects its kernels from the gfx arch the runtime reports, and parts
+/// whose arch ships no rocBLAS kernels (gfx1152, for one) only work when
+/// `HSA_OVERRIDE_GFX_VERSION` points at a compatible sibling. That lives in
+/// the launching shell, which systemd does not inherit, so a unit written
+/// without it starts a daemon that dies at the first GEMM. Whatever the
+/// working process was given is recorded here rather than hardcoded, so a
+/// machine that needs no override gets no `Environment=` line at all.
+fn inherited_env() -> String {
+    ["HSA_OVERRIDE_GFX_VERSION"]
+        .iter()
+        .filter_map(|key| {
+            let value = std::env::var(key).ok()?;
+            Some(format!("Environment={key}={value}\n"))
+        })
+        .collect()
+}
+
 fn unit_template(repo_root: &std::path::Path, binary: &std::path::Path) -> String {
     format!(
         "[Unit]\n\
@@ -11,6 +30,7 @@ fn unit_template(repo_root: &std::path::Path, binary: &std::path::Path) -> Strin
          PartOf=graphical-session.target\n\
          \n\
          [Service]\n\
+         {}\
          ExecStart={}\n\
          WorkingDirectory={}\n\
          Restart=on-failure\n\
@@ -18,6 +38,7 @@ fn unit_template(repo_root: &std::path::Path, binary: &std::path::Path) -> Strin
          \n\
          [Install]\n\
          WantedBy=graphical-session.target\n",
+        inherited_env(),
         binary.display(),
         repo_root.display(),
     )
