@@ -7,8 +7,8 @@ pub mod theme;
 use crate::overlay::OverlayView;
 use crate::state::AppState;
 use gpui::{
-    prelude::*, px, size, App, Bounds, Entity, Global, SharedString, TitlebarOptions, WindowBounds, WindowHandle,
-    WindowOptions,
+    prelude::*, px, size, App, Bounds, Entity, Global, WindowBounds, WindowDecorations,
+    WindowHandle, WindowOptions,
 };
 use main_window::MainWindow;
 
@@ -40,10 +40,10 @@ pub fn show_main(state: &Entity<AppState>, cx: &mut App) {
         .open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
-                titlebar: Some(TitlebarOptions {
-                    title: Some(SharedString::from("Dictation")),
-                    ..Default::default()
-                }),
+                // No system titlebar: MainWindow draws its own header, which
+                // doubles as the drag handle and carries the window controls.
+                titlebar: None,
+                window_decorations: Some(WindowDecorations::Client),
                 app_id: Some("dictation-tool".to_string()),
                 window_min_size: Some(size(px(480.), px(320.))),
                 ..Default::default()
