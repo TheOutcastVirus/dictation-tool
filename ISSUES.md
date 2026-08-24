@@ -8,9 +8,10 @@
 | Input injection | Mutter `org.gnome.Mutter.RemoteDesktop` keysyms (primary), uinput (fallback) |
 | Compositor | GNOME / Mutter, X11 or Wayland |
 | ASR | whisper-rs (whisper.cpp, ROCm/HIP), in-process |
-| Model | `ggml-medium.en.bin` by default, switchable in Settings |
+| Model | `ggml-medium.en.bin` by default; base.en / small.en / medium.en / large-v3-turbo switchable in Settings |
 | Hotkey | Right Alt, hold-to-record, 300 ms minimum |
-| Audio | cpal, 16 kHz mono float32 |
+| Audio | cpal, 16 kHz mono float32, RMS level every 60 ms |
+| Window | client-side decorations, no system titlebar |
 
 ---
 
@@ -28,7 +29,7 @@
   the engine loop, which always stops capture on key-up.
 - **Indicator disappears before transcription finishes** -- the overlay
   now switches to a spinner on key-up and closes only after the text has
-  been typed.
+  been typed. It sits at the bottom-centre of the primary display.
 - **Broken systemd unit** -- the binary writes a correct unit for its own
   path on first launch; no hardcoded `Documents/`, UID, or display vars
   (the GNOME session already imports `DISPLAY`/`WAYLAND_DISPLAY` into the
@@ -64,6 +65,20 @@ for full virtualised scrolling if the full log needs to be browsable.
 **Severity:** Low. `switch_model` loads the new context before dropping
 the old one, so both are briefly resident. Fine for medium <-> small;
 could OOM switching between two large models on a small card.
+
+### Deleting history races an append
+
+**Severity:** Low. `History::delete` re-reads the log, drops the matching
+line, writes a temp file and renames it, then reloads. A dictation logged
+between the read and the rename would be lost; the length check before the
+rename catches that and abandons the delete, so the user clicks again.
+
+### No client-side decorations without a compositor
+
+**Severity:** Low. GPUI falls back to server-side decorations when no
+compositor is running, and the window then has both a system titlebar and
+its own header. The drag region and window buttons are omitted in that
+case, so nothing is duplicated, but the titlebar is back.
 
 ### Overlay transparency on X11
 

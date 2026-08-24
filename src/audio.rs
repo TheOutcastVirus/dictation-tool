@@ -3,6 +3,10 @@
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::{Arc, Mutex};
+
+/// How often the capture thread emits an RMS level. The waveform band reads
+/// this back to turn a sample count into elapsed seconds.
+pub const LEVEL_INTERVAL_MS: u64 = 60;
 use std::time::{Duration, Instant};
 
 pub const SAMPLE_RATE: u32 = 16_000;
@@ -88,7 +92,7 @@ impl Recorder {
         let buffer = self.buffer.clone();
         let mut window: Vec<f32> = Vec::new();
         let mut last_emit = Instant::now();
-        let emit_every = Duration::from_millis(60);
+        let emit_every = Duration::from_millis(LEVEL_INTERVAL_MS);
 
         let stream = device
             .build_input_stream(

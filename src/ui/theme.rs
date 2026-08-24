@@ -1,64 +1,52 @@
-//! Zed-like dark palette and a couple of shared building blocks.
+//! The recorder's desk.
+//!
+//! Warm ink, bone type, and one signal colour: the record light. Everything
+//! else is separated by value alone, so the only thing on screen that is
+//! coloured is the thing that is actually happening.
 
-use gpui::{div, prelude::*, rgb, Div, ElementId, Rgba, SharedString, Stateful};
+use gpui::{rgb, Rgba};
 
-pub fn bg() -> Rgba {
-    rgb(0x1b1d24)
-}
-pub fn surface() -> Rgba {
-    rgb(0x23262f)
-}
-pub fn surface_hi() -> Rgba {
-    rgb(0x2c303b)
-}
-pub fn hover() -> Rgba {
-    rgb(0x343948)
-}
-pub fn border() -> Rgba {
-    rgb(0x363a47)
-}
-pub fn text() -> Rgba {
-    rgb(0xd7d9e0)
-}
-pub fn muted() -> Rgba {
-    rgb(0x8a8fa3)
-}
-pub fn accent() -> Rgba {
-    rgb(0x5b9cf5)
-}
-pub fn green() -> Rgba {
-    rgb(0x4fc38a)
-}
-pub fn red() -> Rgba {
-    rgb(0xe06c75)
-}
-pub fn yellow() -> Rgba {
-    rgb(0xe5c07b)
-}
+/// Berenis ADF Pro (Arkandis Digital Foundry). Carries everything human:
+/// transcripts, headings, controls. A reading serif, because the content of
+/// this app is prose someone spoke.
+pub const DISPLAY: &str = "Berenis ADF Pro";
 
-/// Small pill button. Caller attaches `.on_click(...)`.
-pub fn button(id: impl Into<ElementId>, label: impl Into<SharedString>, primary: bool) -> Stateful<Div> {
-    let label: SharedString = label.into();
-    div()
-        .id(id)
-        .flex_none()
-        .px_2()
-        .py_0p5()
-        .rounded_md()
-        .text_xs()
-        .cursor_pointer()
-        .border_1()
-        .border_color(border())
-        .bg(if primary { accent() } else { surface_hi() })
-        .text_color(if primary { rgb(0xffffff) } else { text() })
-        .hover(|s| s.bg(hover()))
-        .active(|s| s.opacity(0.8))
-        .child(label)
-}
+/// Go Mono (Bigelow & Holmes). Carries machine data only -- timestamps,
+/// durations, milliseconds, byte counts, filenames. Never running text.
+pub const DATA: &str = "Go Mono";
 
-pub fn section_title(label: impl Into<SharedString>) -> impl IntoElement {
-    div()
-        .text_xs()
-        .text_color(muted())
-        .child(label.into().to_uppercase())
+pub fn ink() -> Rgba {
+    rgb(0x16130f)
+}
+pub fn panel() -> Rgba {
+    rgb(0x1d1913)
+}
+pub fn lift() -> Rgba {
+    rgb(0x262019)
+}
+/// A stroke set near the surface's own colour: an edge you feel rather than
+/// a line you read. Used sparingly, never as a box around everything.
+pub fn edge() -> Rgba {
+    rgb(0x2f2820)
+}
+pub fn bone() -> Rgba {
+    rgb(0xede4d6)
+}
+pub fn bone_dim() -> Rgba {
+    rgb(0xa79b89)
+}
+/// Tertiary. Measured at 5.3:1 on `ink`, 5.0:1 on `panel` and 4.6:1 on
+/// `lift` -- it has to clear all three, because a selected row uses `lift`
+/// behind data set in this colour.
+pub fn bone_faint() -> Rgba {
+    rgb(0x948976)
+}
+/// The record light. The only saturated colour in the app.
+pub fn signal() -> Rgba {
+    rgb(0xe2603c)
+}
+/// Work in progress: analogous to `signal`, so the two harmonise instead of
+/// competing. Loading a model, transcribing.
+pub fn working() -> Rgba {
+    rgb(0xb8894a)
 }

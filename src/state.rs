@@ -30,13 +30,18 @@ pub enum EngineCommand {
     SwitchModel(PathBuf),
 }
 
-const LEVEL_HISTORY_LEN: usize = 24;
+/// ~11 s of level samples at the audio thread's 60 ms cadence: enough to
+/// fill the waveform band at one column per 4 px.
+const LEVEL_HISTORY_LEN: usize = 192;
 
 /// Owned by the GPUI foreground as an `Entity<AppState>`; mutated only on
 /// the main thread (event bridge + pollers in `main.rs`, UI handlers).
 pub struct AppState {
     pub engine_state: EngineState,
     pub level_history: VecDeque<f32>,
+    /// The envelope of the last completed utterance, kept so the waveform
+    /// band shows real audio even when nothing is being recorded.
+    pub last_envelope: Vec<f32>,
     pub current_model: String,
     pub model_status: Option<String>,
     pub vram: Option<VramStats>,
@@ -54,9 +59,10 @@ impl AppState {
         let mut state = AppState {
             engine_state: EngineState::Idle,
             level_history: VecDeque::with_capacity(LEVEL_HISTORY_LEN),
+            last_envelope: Vec::new(),
             current_model: crate::config::load().model,
             model_status: None,
-            vram: crate::vram::read_primary_amd_vram(),
+            vram: crate::vram::read_model_vram(),
             history: History::load(),
             engine_online: false,
             last_error: None,
@@ -91,6 +97,29 @@ impl AppState {
         self.level_history.push_back(level);
     }
 
+    /// Moves the live level stream into `last_envelope`. A recording too
+    /// short to have any shape is discarded rather than replacing a good
+    /// trace with a flat line.
+    fn hold_envelope(&mut self) {
+        if self.level_history.len() > 2 {
+            self.last_envelope = self.level_history.iter().copied().collect();
+        }
+        self.level_history.clear();
+    }
+
+    /// What the waveform band should draw: the live stream while recording,
+    /// otherwise the envelope of the last thing that was said.
+    pub fn trace(&self) -> (Vec<f32>, crate::ui::waveform::Trace) {
+        if self.engine_state == EngineState::Recording {
+            (
+                self.level_history.iter().copied().collect(),
+                crate::ui::waveform::Trace::Live,
+            )
+        } else {
+            (self.last_envelope.clone(), crate::ui::waveform::Trace::Held)
+        }
+    }
+
     pub fn request_model(&mut self, name: &str) {
         let path = self.models_dir.join(name);
         self.model_status = Some(format!("Loading {name}..."));
@@ -107,7 +136,7 @@ impl AppState {
                     // A fresh session: drop any stale error from the last one.
                     self.last_error = None;
                 } else {
-                    self.level_history.clear();
+                    self.hold_envelope();
                 }
             }
             EngineEvent::Level(level) => self.push_level(level),
@@ -126,7 +155,7 @@ impl AppState {
                 self.last_error = Some(err);
                 self.engine_online = false;
                 self.engine_state = EngineState::Idle;
-                self.level_history.clear();
+                self.hold_envelope();
             }
             EngineEvent::ShowWindow => return true,
         }
@@ -137,7 +166,7 @@ impl AppState {
     pub fn engine_down(&mut self) {
         self.engine_online = false;
         self.engine_state = EngineState::Idle;
-        self.level_history.clear();
+        self.hold_envelope();
         if self.last_error.is_none() {
             self.last_error = Some("engine thread exited".to_string());
         }

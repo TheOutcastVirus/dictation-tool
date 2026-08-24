@@ -1,20 +1,21 @@
-//! Floating "recording / transcribing" bubble, top-center of the primary
+//! Floating "recording / transcribing" bubble, bottom-center of the primary
 //! display. Opened on Idle -> Recording, closed on -> Idle (which the engine
 //! only signals after the text has been typed).
 
-pub mod level_meter;
 pub mod spinner;
 
 use crate::state::{AppState, EngineState};
-use crate::ui::{theme, Windows};
+use crate::ui::{theme, waveform, Windows};
 use gpui::{
     div, point, prelude::*, px, size, App, Bounds, Context, Entity, Window, WindowBackgroundAppearance,
     WindowBounds, WindowKind, WindowOptions,
 };
 
-const WIDTH: f32 = 220.0;
+const WIDTH: f32 = 260.0;
 const HEIGHT: f32 = 56.0;
-const TOP_MARGIN: f32 = 48.0;
+/// Distance from the bottom of the primary display to the bottom of the
+/// bubble. Clears a typical dock or taskbar.
+const BOTTOM_MARGIN: f32 = 72.0;
 
 pub struct OverlayView {
     state: Entity<AppState>,
@@ -30,12 +31,15 @@ impl OverlayView {
 impl Render for OverlayView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.read(cx);
+        let (levels, trace) = state.trace();
         let content = match state.engine_state {
+            // The same trace as the main window, at bubble scale: the two
+            // windows show one thing, not two different indicators.
             EngineState::Recording => div()
                 .flex()
                 .items_center()
                 .gap_3()
-                .child(level_meter::render(&state.level_history))
+                .child(div().w(px(96.)).h(px(22.)).child(waveform::render(levels, trace)))
                 .child("Listening"),
             EngineState::Processing => div()
                 .flex()
@@ -58,13 +62,14 @@ impl Render for OverlayView {
                     .justify_center()
                     .px_4()
                     .h(px(44.))
-                    .min_w(px(200.))
+                    .min_w(px(220.))
                     .rounded_full()
-                    .bg(theme::bg())
+                    .bg(theme::ink())
                     .border_1()
-                    .border_color(theme::border())
-                    .text_sm()
-                    .text_color(theme::text())
+                    .border_color(theme::edge())
+                    .font_family(theme::DISPLAY)
+                    .text_size(px(14.))
+                    .text_color(theme::bone())
                     .child(content),
             )
     }
@@ -106,7 +111,7 @@ fn open(state: Entity<AppState>, cx: &mut App) -> Option<gpui::WindowHandle<Over
     let bounds = Bounds {
         origin: point(
             monitor.origin.x + (monitor.size.width - px(WIDTH)) / 2.0,
-            monitor.origin.y + px(TOP_MARGIN),
+            monitor.origin.y + monitor.size.height - px(BOTTOM_MARGIN + HEIGHT),
         ),
         size: size(px(WIDTH), px(HEIGHT)),
     };

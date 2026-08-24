@@ -137,7 +137,7 @@ fn spawn_pollers(state: Entity<AppState>, cx: &mut App) {
             .await;
         let alive = state
             .update(cx, |s, cx| {
-                s.vram = vram::read_primary_amd_vram();
+                s.vram = vram::read_model_vram();
                 s.history.poll();
                 s.refresh_models();
                 cx.notify();

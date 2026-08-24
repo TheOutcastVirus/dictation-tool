@@ -12,7 +12,7 @@ pub fn render() -> impl IntoElement {
             div()
                 .size(px(7.))
                 .rounded_full()
-                .bg(theme::accent())
+                .bg(theme::working())
                 .with_animation(
                     ("spinner-dot", i),
                     Animation::new(Duration::from_millis(900)).repeat(),

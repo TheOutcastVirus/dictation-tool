@@ -3,6 +3,7 @@ pub mod main_window;
 pub mod settings_view;
 pub mod status_bar;
 pub mod theme;
+pub mod waveform;
 
 use crate::overlay::OverlayView;
 use crate::state::AppState;
@@ -22,6 +23,14 @@ pub struct Windows {
 }
 
 impl Global for Windows {}
+
+/// "ggml-large-v3-turbo.bin" -> "large v3 turbo". The filename is an
+/// implementation detail of whisper.cpp; the model has a name.
+pub fn model_label(file: &str) -> String {
+    file.trim_start_matches("ggml-")
+        .trim_end_matches(".bin")
+        .replace('-', " ")
+}
 
 /// Opens the main window, or raises it if it is already open.
 pub fn show_main(state: &Entity<AppState>, cx: &mut App) {
