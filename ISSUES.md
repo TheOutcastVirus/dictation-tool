@@ -17,11 +17,19 @@
 
 ## Resolved by the Rust port
 
-- **Keystroke race corrupting capitalization** -- primary path is keysym
-  injection; Mutter resolves modifiers itself. uinput fallback keeps the
-  empirically tuned delays from the old Python typer (3 ms / 1 ms / 1 ms).
-- **Unicode dropped** -- keysym path handles arbitrary codepoints; the
-  uinput fallback logs anything it cannot map.
+- **Keystroke race corrupting capitalization** -- fixed, but not by keysym
+  injection alone, which this file previously credited. Mutter wraps a
+  shifted keysym as `Shift press, key press` / `key release, Shift release`,
+  so a release sent immediately behind the press retracted the shift before
+  the client had applied it: every capital and every shifted punctuation mark
+  was lost on native Wayland clients (`?` arrived as `/`, `!` as `1`), while
+  X11 clients were unaffected because XWayland tracks modifier state
+  server-side. Each keysym is now held down for `KEYSYM_HOLD` (6 ms) before
+  release. The uinput fallback keeps the empirically tuned delays from the old
+  Python typer (3 ms / 1 ms / 1 ms).
+- **Unicode dropped** -- partially. The uinput fallback logs anything it
+  cannot map. The keysym path does *not* handle arbitrary codepoints, despite
+  the earlier claim here; see Open below.
 - **whisper-server crash not detected** -- there is no server any more; the
   model lives in-process. Inference errors are logged and reported in the
   status bar rather than killing a thread.
@@ -40,6 +48,19 @@
 ---
 
 ## Open
+
+### Non-Latin-1 characters type nothing on the Mutter path
+
+**Severity:** Low. `char_keysym` encodes anything outside ASCII/Latin-1 as a
+Unicode keysym (`0x01000000 | codepoint`), but Mutter resolves a keysym by
+looking for a keycode already carrying it in the active keymap, and a Unicode
+keysym is not in one. Measured: a full sentence sent that way produces no
+input at all -- silently, since the call still succeeds. `normalize()` folds
+the characters whisper actually emits (smart quotes, dashes, ellipsis) down to
+ASCII, so this is not reachable from ordinary dictation, but an emoji or a
+non-Latin script would vanish rather than fall back. Fix: detect the
+unmappable case and route those characters through the uinput backend, or have
+Mutter remap a scratch keycode.
 
 ### Keyboard hotplug
 

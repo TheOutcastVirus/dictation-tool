@@ -1,13 +1,25 @@
 //! Port of `typer.py`. Two backends: Mutter's private `RemoteDesktop` D-Bus
-//! keysym API (primary, no permission dialog, immune to the uinput timing
-//! race — see below) and a uinput fallback for non-GNOME compositors.
+//! keysym API (primary, no permission dialog) and a uinput fallback for
+//! non-GNOME compositors.
 //!
-//! Per-character keystroke injection via uinput is racy on GNOME/Mutter: the
-//! compositor's xkbcommon modifier state updates asynchronously relative to
-//! uinput events, corrupting capitalization/shifted punctuation when events
-//! arrive faster than the compositor can keep up. Handing Mutter complete
-//! keysyms instead avoids the race by construction, since Mutter resolves
-//! keysym -> keycode + modifiers on its own input thread.
+//! Per-character keystroke injection is racy on GNOME/Mutter: modifier state
+//! propagates to clients asynchronously, so capitalization and shifted
+//! punctuation corrupt when events arrive faster than the client can keep up.
+//! Handing Mutter whole keysyms does not avoid this by itself, which an
+//! earlier version of this file claimed. Mutter resolves a keysym needing
+//! level 2 by wrapping it -- `Shift press, key press` on our press event and
+//! `key release, Shift release` on our release -- and a release sent
+//! immediately behind the press pushes the `Shift release` out before the
+//! client has applied the `Shift press`. The key is then evaluated unshifted.
+//!
+//! Measured against a native Wayland client: sending the pairs back to back
+//! loses *every* shifted character ("Is this working? Yes!" arrives as "is
+//! this working/ yes1"), and a partial delay leaves shift trailing a
+//! character behind ("WorKiNg"). X11 clients are immune -- XWayland tracks
+//! modifier state server-side and delivers it with the event -- which is why
+//! this went unnoticed. Holding each keysym down for `KEYSYM_HOLD` before
+//! releasing it fixes it; a gap *between* characters instead does not, at any
+//! length, because it does not separate the press from its own release.
 
 use std::collections::HashMap;
 use std::thread::sleep;
@@ -20,6 +32,16 @@ const RD_BUS: &str = "org.gnome.Mutter.RemoteDesktop";
 const RD_PATH: &str = "/org/gnome/Mutter/RemoteDesktop";
 const RD_IFACE: &str = "org.gnome.Mutter.RemoteDesktop";
 const RD_SESSION_IFACE: &str = "org.gnome.Mutter.RemoteDesktop.Session";
+
+/// How long a keysym is held between its press and its release.
+///
+/// This is the whole fix: it is the window in which the client applies the
+/// `Shift press` Mutter emitted alongside the key. Measured on gfx1152/GNOME
+/// 42 against a native Wayland client, 2ms still corrupted the first shifted
+/// character and 4ms passed; 6ms leaves margin and costs ~0.9s for a 134
+/// character utterance, against transcription's own ~0.5-1s. A gap between
+/// characters is not a substitute -- 8ms of it still lost every capital.
+const KEYSYM_HOLD: Duration = Duration::from_micros(6_000);
 
 fn normalize(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -73,39 +95,39 @@ impl MutterKeyboard {
         Ok(MutterKeyboard { conn, session_path })
     }
 
-    /// Sends every keysym event except the last with `NoReplyExpected` set,
-    /// flushed as a single burst so the whole text lands at once (~6ms for
-    /// 80 chars, vs ~80ms waiting for each reply). The final event still
-    /// round-trips, fencing the burst so a dead session surfaces as an error
-    /// here rather than silently dropping text.
+    /// Fires each event with `NoReplyExpected` rather than waiting on a reply,
+    /// but holds every keysym down for `KEYSYM_HOLD` before releasing it so
+    /// Mutter's implicit `Shift` reaches the client while the key is still
+    /// down. The final release round-trips, fencing the run so a dead session
+    /// surfaces as an error here rather than silently dropping text.
     fn type_text(&self, text: &str) -> zbus::Result<()> {
-        let mut events: Vec<(u32, bool)> = Vec::with_capacity(text.chars().count() * 2);
-        for ch in text.chars() {
+        let mut chars = text.chars().peekable();
+        while let Some(ch) = chars.next() {
             let keysym = char_keysym(ch);
-            events.push((keysym, true));
-            events.push((keysym, false));
+            self.send_keysym(keysym, true)?;
+            sleep(KEYSYM_HOLD);
+            if chars.peek().is_some() {
+                self.send_keysym(keysym, false)?;
+            } else {
+                self.conn.call_method(
+                    Some(RD_BUS),
+                    self.session_path.as_str(),
+                    Some(RD_SESSION_IFACE),
+                    "NotifyKeyboardKeysym",
+                    &(keysym, false),
+                )?;
+            }
         }
-        let Some((last, burst)) = events.split_last() else {
-            return Ok(());
-        };
+        Ok(())
+    }
 
-        for &(keysym, pressed) in burst {
-            let msg = Message::method_call(self.session_path.as_str(), "NotifyKeyboardKeysym")?
-                .destination(RD_BUS)?
-                .interface(RD_SESSION_IFACE)?
-                .with_flags(Flags::NoReplyExpected)?
-                .build(&(keysym, pressed))?;
-            self.conn.send(&msg)?;
-        }
-
-        let (keysym, pressed) = *last;
-        self.conn.call_method(
-            Some(RD_BUS),
-            self.session_path.as_str(),
-            Some(RD_SESSION_IFACE),
-            "NotifyKeyboardKeysym",
-            &(keysym, pressed),
-        )?;
+    fn send_keysym(&self, keysym: u32, pressed: bool) -> zbus::Result<()> {
+        let msg = Message::method_call(self.session_path.as_str(), "NotifyKeyboardKeysym")?
+            .destination(RD_BUS)?
+            .interface(RD_SESSION_IFACE)?
+            .with_flags(Flags::NoReplyExpected)?
+            .build(&(keysym, pressed))?;
+        self.conn.send(&msg)?;
         Ok(())
     }
 
