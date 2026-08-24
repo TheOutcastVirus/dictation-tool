@@ -18,7 +18,7 @@
 
 - **Keystroke race corrupting capitalization** -- primary path is keysym
   injection; Mutter resolves modifiers itself. uinput fallback keeps the
-  empirically tuned delays from `typer.py` (3 ms / 1 ms / 1 ms).
+  empirically tuned delays from the old Python typer (3 ms / 1 ms / 1 ms).
 - **Unicode dropped** -- keysym path handles arbitrary codepoints; the
   uinput fallback logs anything it cannot map.
 - **whisper-server crash not detected** -- there is no server any more; the
@@ -71,10 +71,3 @@ could OOM switching between two large models on a small card.
 background; if the X server / GPUI picks an opaque visual the rounded
 corners show a dark square. Set `window_background` to `Opaque` in
 `src/overlay/mod.rs` if that happens.
-
-### Python files still in the tree
-
-`main.py`, `recorder.py`, `transcriber.py`, `typer.py`, `indicator.py`,
-`logger.py`, `requirements.txt`, `dictation.service` are the reference
-implementation. Delete them after a side-by-side check of a few real
-dictations against the Rust binary.

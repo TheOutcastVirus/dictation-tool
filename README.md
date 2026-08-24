@@ -55,7 +55,7 @@ Two build notes specific to this machine:
 Config: `~/.config/dictation-tool/config.toml` (`model = "<file>"`).
 History: `~/.local/share/dictation-tool/dictation.jsonl` -- one JSON object
 per line, the same schema the earlier Python version wrote, so old entries
-show up in the History tab.
+still show up in the History tab.
 
 ## Stack
 
@@ -83,7 +83,7 @@ src/
   hotkey.rs        evdev Right-Alt hold detection
   audio.rs         cpal capture + RMS level stream
   transcribe.rs    whisper-rs wrapper (load / switch / transcribe)
-  inject.rs        Mutter keysym injection + uinput fallback (port of typer.py)
+  inject.rs        Mutter keysym injection + uinput fallback
   logger.rs        JSONL history writer
   history.rs       JSONL tailer for the History tab
   config.rs        config.toml
@@ -94,7 +94,3 @@ src/
   ui/              main window, history view, settings view, status bar, theme
   overlay/         floating bubble, level meter, spinner
 ```
-
-`main.py` and friends are the previous Python implementation, kept as the
-porting reference until the Rust binary has been checked side by side on
-real dictations; they are not used at runtime.
