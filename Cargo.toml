@@ -1,0 +1,13 @@
+[package]
+name = "dictation-tool"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "dictation-tool"
+path = "src/main.rs"
+
+[dependencies]
+gpui = "0.2.2"
+whisper-rs = { version = "0.16.0", features = ["hipblas"] }
+hound = "3"
