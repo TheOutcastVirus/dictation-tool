@@ -44,6 +44,8 @@ fn main() {
 
     engine::spawn(models_dir.clone(), event_tx, cmd_rx);
 
+    prefer_x11_backend();
+
     Application::new().run(move |cx: &mut App| {
         let state = cx.new(|_| AppState::new(models_dir, cmd_tx));
         cx.set_global(ui::Windows::default());
@@ -55,6 +57,34 @@ fn main() {
 
         cx.activate(true);
     });
+}
+
+/// Steers GPUI onto its X11 backend when the session offers one.
+///
+/// The overlay bubble needs two things from a window: that focusing it never
+/// steals the caret from whatever is being dictated into, and that it can put
+/// itself bottom-centre of the display. GPUI's Wayland backend gives neither.
+/// xdg-shell has no "do not focus me" hint -- `WindowOptions::focus` is
+/// `allow(dead_code)` on Linux and `WindowKind::PopUp` is ignored there -- so
+/// Mutter focuses the bubble the instant it maps and the transcription is
+/// typed into the bubble rather than the target window. Wayland also forbids
+/// a client positioning its own surface, so the bubble lands wherever the
+/// compositor likes.
+///
+/// The X11 backend has both: `PopUp` becomes `_NET_WM_WINDOW_TYPE_NOTIFICATION`,
+/// which Mutter never focuses, and absolute bounds are honoured (what
+/// `primary_monitor_via_xrandr` in the overlay is already written against).
+/// A Wayland session runs XWayland, so hiding `WAYLAND_DISPLAY` from GPUI is
+/// enough to get it. Set `DICTATION_FORCE_WAYLAND` to opt back out.
+fn prefer_x11_backend() {
+    if std::env::var_os("DICTATION_FORCE_WAYLAND").is_some() {
+        return;
+    }
+    let has_x11 = std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty());
+    let on_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|d| !d.is_empty());
+    if has_x11 && on_wayland {
+        std::env::remove_var("WAYLAND_DISPLAY");
+    }
 }
 
 /// The directory containing `whisper.cpp/models`: the working directory
