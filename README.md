@@ -1,72 +1,96 @@
 # dictation
 
-Hold **Right Alt** to record your voice. Release to transcribe and type the result into the active window. Runs locally — no network calls.
+Hold **Right Alt** to record your voice. Release to transcribe and type the
+result into the active window. Runs locally on the GPU -- no network calls.
+
+One Rust binary owns the whole pipeline: hotkey capture, microphone capture,
+in-process Whisper inference (whisper.cpp via ROCm/HIP), text injection, and
+a small GPUI companion window (history, model picker, VRAM readout,
+run-at-login toggle) plus a floating "Listening / Transcribing" bubble.
 
 ## Requirements
 
-- Linux with Wayland (tested on GNOME 42 / Mutter)
-- `/dev/uinput` writable by your user (the user must be in the `input` group, or have an ACL on `/dev/uinput`)
-- A built `whisper.cpp` with `whisper-server` and a model at `whisper.cpp/models/ggml-medium.en.bin`
-- Python 3.10+
+- GNOME / Mutter (X11 or Wayland session -- text is injected through
+  Mutter's private `org.gnome.Mutter.RemoteDesktop` D-Bus API, no
+  permission dialog; falls back to uinput typing elsewhere)
+- Your user in the `input` group (evdev hotkey capture; uinput fallback)
+- An AMD GPU with ROCm/HIP installed (`hipcc` on the PATH at build time)
+- A Whisper model in `whisper.cpp/models/` (default `ggml-medium.en.bin`)
+- Rust stable toolchain, Vulkan (for GPUI's renderer), `libxkbcommon-x11-dev`
 
-## Setup
-
-```bash
-pip install -r requirements.txt
-```
-
-## Usage
+## Build
 
 ```bash
-python main.py
+env -u LD_PRELOAD -u LD_LIBRARY_PATH AMDGPU_TARGETS=gfx1030 cargo build --release
 ```
 
-Hold **Right Alt** to start recording. Release to stop — the transcribed text will be typed at the cursor.
+Two build notes specific to this machine:
+
+- `whisper-rs-sys` compiles its own copy of whisper.cpp with `hipcc`. This
+  shell has a stray global `LD_PRELOAD` / ROS `LD_LIBRARY_PATH` that gets
+  injected into the compiler itself and crashes it ("pure virtual method
+  called"). Unsetting both for the build fixes it; the resulting binary
+  does not need the workaround at runtime.
+- `AMDGPU_TARGETS=gfx1030` pins the discrete GPU target (the iGPU is
+  `gfx1036` and not worth compiling for).
+
+## Run
+
+```bash
+./target/release/dictation-tool
+```
+
+- First launch writes `~/.config/systemd/user/dictation-tool.service`
+  (pointing at the binary you launched) and reloads the user manager.
+  Flip **Run at login** in Settings to enable it.
+- The binary is single-instance (session-bus name `dev.dictation.Tool`).
+  Launching it again just raises the running instance's window.
+- Closing the main window does **not** stop the daemon -- the hotkey keeps
+  working. Relaunch the binary to get the window back; `systemctl --user
+  stop dictation-tool` (or `kill`) stops it.
+- The overlay bubble appears at the top of the primary display while
+  recording (level meter) and while transcribing (spinner); it disappears
+  only after the text has been typed.
+
+Config: `~/.config/dictation-tool/config.toml` (`model = "<file>"`).
+History: `~/.local/share/dictation-tool/dictation.jsonl` -- one JSON object
+per line, the same schema the earlier Python version wrote, so old entries
+still show up in the History tab.
 
 ## Stack
 
 | Component | Library |
 |-----------|---------|
-| Speech-to-text | whisper.cpp (`ggml-medium.en`, GPU via ROCm/HIP, persistent server) |
-| Audio capture | sounddevice + numpy |
-| Hotkey listener | evdev |
-| Text output | Mutter RemoteDesktop keysym injection (uinput typing as fallback) |
-| Recording indicator | tkinter |
+| UI | GPUI 0.2 (Zed's UI framework) |
+| Speech-to-text | whisper-rs 0.16 (`hipblas`), model resident in VRAM |
+| Audio capture | cpal, 16 kHz mono f32 (resampled if the device refuses) |
+| Hotkey | evdev, one listener thread per physical keyboard |
+| Text output | Mutter RemoteDesktop keysyms via zbus; uinput fallback |
+| Single instance | zbus well-known name |
 
-Text is injected as keysyms ("capital H") through Mutter's private
-`org.gnome.Mutter.RemoteDesktop` D-Bus API — the same interface
-gnome-remote-desktop uses. Mutter resolves each keysym to keycode +
-modifiers on its own input thread, so the modifier-state race that
-corrupts uinput typing ("Hello" -> "hEllo") cannot happen, arbitrary
-Unicode works, and no inter-key delays are needed. No permission dialog
-is shown.
+Text injection sends every keysym event except the last with
+`NoReplyExpected`, so the whole utterance lands as one burst (~6 ms for 80
+chars) and appears at once like a paste. Mutter resolves each keysym to
+keycode + modifiers on its own input thread, which is what makes it immune
+to the uinput modifier-timing race that corrupted "Hello" into "hEllo".
 
-On non-GNOME compositors (or if the D-Bus session fails) the typer falls
-back to character-by-character uinput typing with conservative delays
-(~80 cps) to stay clear of the compositor's xkbcommon modifier-state
-race. Tuning for the fallback lives in `typer.py`.
-
-## Files
+## Layout
 
 ```
-main.py          # entry point — hotkey listener and orchestration
-recorder.py      # audio capture
-transcriber.py   # whisper.cpp server wrapper
-typer.py         # text injection: Mutter keysym API, uinput fallback
-indicator.py     # "Recording..." UI overlay
-logger.py        # JSONL transcription log
-requirements.txt # Python dependencies
-dictation.service # optional systemd user service
+src/
+  main.rs          entry: single-instance guard, engine thread, GPUI app, event bridge
+  engine.rs        background orchestrator: hotkey -> record -> transcribe -> log -> type
+  hotkey.rs        evdev Right-Alt hold detection
+  audio.rs         cpal capture + RMS level stream
+  transcribe.rs    whisper-rs wrapper (load / switch / transcribe)
+  inject.rs        Mutter keysym injection + uinput fallback
+  logger.rs        JSONL history writer
+  history.rs       JSONL tailer for the History tab
+  config.rs        config.toml
+  vram.rs          AMD sysfs VRAM reader
+  autostart.rs     systemd user unit install / enable
+  instance.rs      D-Bus single-instance guard
+  state.rs         AppState + engine event/command enums
+  ui/              main window, history view, settings view, status bar, theme
+  overlay/         floating bubble, level meter, spinner
 ```
-
-## Running as a service (optional)
-
-Copy and enable the included systemd user service:
-
-```bash
-cp dictation.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now dictation
-```
-
-> **Note:** the unit sets `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR` so the indicator window can reach the user's compositor.

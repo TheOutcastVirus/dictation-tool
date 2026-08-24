@@ -1,183 +1,73 @@
-# Dictation Tool — Known Issues
+# Dictation Tool -- Known Issues
 
 ## Tech Stack
 
 | Component | Detail |
 |---|---|
-| Input injection | `evdev` / `uinput` (kernel virtual device) |
-| Compositor | GNOME/Mutter on Wayland |
-| ASR backend | `whisper.cpp` HTTP server (ROCm/HIP GPU) |
-| Model | `ggml-medium.en.bin` |
-| Hotkey | Right Alt (hold-to-record) |
-| Audio | `sounddevice` → 16 kHz mono float32 PCM |
+| Binary | single Rust process (`src/`), GPUI companion window |
+| Input injection | Mutter `org.gnome.Mutter.RemoteDesktop` keysyms (primary), uinput (fallback) |
+| Compositor | GNOME / Mutter, X11 or Wayland |
+| ASR | whisper-rs (whisper.cpp, ROCm/HIP), in-process |
+| Model | `ggml-medium.en.bin` by default, switchable in Settings |
+| Hotkey | Right Alt, hold-to-record, 300 ms minimum |
+| Audio | cpal, 16 kHz mono float32 |
 
 ---
 
-## Issue 1 — Keystroke injection races causing capitalization/punctuation corruption
+## Resolved by the Rust port
 
-**Severity:** High  
-**Status:** Resolved — primary path now uses Mutter RemoteDesktop keysym
-injection (`org.gnome.Mutter.RemoteDesktop` D-Bus API). Mutter resolves each
-keysym to keycode + modifiers on its own input thread, so the race cannot
-occur by construction. The racy uinput path remains only as a fallback for
-non-GNOME compositors, where the description below still applies.  
-**File:** `typer.py`
-
-### Description
-
-Per-character keystroke injection via uinput is racy under GNOME/Mutter on Wayland.
-The compositor's `xkbcommon` modifier state updates asynchronously relative to
-incoming uinput events. When Shift press/release events and key-down events arrive
-faster than the compositor can process them, the modifier state is misread and
-characters come out wrong — e.g., `"Hello"` becomes `"hEllo"`, `"?"` is injected
-as `"/"`, etc.
-
-### Root cause
-
-`xkbcommon` state updates happen on the compositor's input thread; uinput events
-are injected on a separate kernel path with no synchronisation barrier. There is
-no API to wait for the compositor to acknowledge a modifier change before sending
-the next key event.
-
-### Current mitigation
-
-Three timing constants in `typer.py` add deliberate sleeps:
-
-```python
-_MODIFIER_SETTLE_S = 0.003   # wait after Shift press/release
-_KEY_HOLD_S        = 0.001   # hold key before releasing it
-_INTER_CHAR_S      = 0.001   # gap between characters
-```
-
-At ~80 characters/second this makes a typical dictated sentence (~80 chars) take
-roughly 1 second to type. This reduces but does not eliminate corruption on
-heavily loaded systems or high refresh-rate compositors.
-
-### Remaining risk
-
-- Under CPU/GPU load the compositor may fall further behind, requiring even larger
-  `_MODIFIER_SETTLE_S`.
-- The values were found empirically; no lower bound is guaranteed to be safe
-  across all GNOME versions or hardware.
-- Consecutive shifted characters (e.g., `"HTTP"`, `"I'll"`) share a single Shift
-  hold and are therefore not affected, but alternating case (e.g., `"iPhone"`)
-  requires two Shift transitions and is highest risk.
-
-### Potential fix — clipboard paste
-
-Copy the transcribed text to the clipboard and inject `Ctrl+V` instead of typing
-character-by-character. This sends only two keystrokes regardless of text length
-and completely sidesteps the Shift-timing issue.
-
-**Obstacle:** the user's existing clipboard contents would be overwritten.
-Saving and restoring clipboard content is possible for plain text via `wl-clipboard`
-(`wl-copy` / `wl-paste`), but clipboard entries that contain images or other
-binary MIME types are harder to round-trip reliably because `wl-copy` can only
-hold one MIME type at a time without a persistent clipboard manager in the loop.
+- **Keystroke race corrupting capitalization** -- primary path is keysym
+  injection; Mutter resolves modifiers itself. uinput fallback keeps the
+  empirically tuned delays from the old Python typer (3 ms / 1 ms / 1 ms).
+- **Unicode dropped** -- keysym path handles arbitrary codepoints; the
+  uinput fallback logs anything it cannot map.
+- **whisper-server crash not detected** -- there is no server any more; the
+  model lives in-process. Inference errors are logged and reported in the
+  status bar rather than killing a thread.
+- **Recorder left running on device loss** -- recording state is owned by
+  the engine loop, which always stops capture on key-up.
+- **Indicator disappears before transcription finishes** -- the overlay
+  now switches to a spinner on key-up and closes only after the text has
+  been typed.
+- **Broken systemd unit** -- the binary writes a correct unit for its own
+  path on first launch; no hardcoded `Documents/`, UID, or display vars
+  (the GNOME session already imports `DISPLAY`/`WAYLAND_DISPLAY` into the
+  user manager).
+- **Two instances typing everything twice** -- single-instance guard via a
+  session-bus name.
 
 ---
 
-## Issue 2 — No clipboard save/restore for paste approach
+## Open
 
-**Severity:** Medium (blocks clipboard-paste fix above)  
-**Status:** Obsolete — the clipboard-paste approach was dropped in favour of
-keysym injection (see Issue 1), which does not touch the clipboard.
+### Keyboard hotplug
 
-### Description
+**Severity:** Low. Keyboards are enumerated once at startup; a keyboard
+plugged in later is not listened to until restart. Fix: watch
+`/dev/input` with inotify/udev and spawn listeners on the fly.
 
-If clipboard injection is used (`wl-copy text && xdg-inject Ctrl+V`) the
-previous clipboard contents are destroyed. For plain-text clipboard entries,
-a save/restore cycle (`wl-paste` before, `wl-copy` after) works.
-For non-text types (images, rich text, files) `wl-paste` does not reliably
-capture all MIME types; restoring them would require a full clipboard-manager
-daemon (e.g. `cliphist`, `wl-clip-persist`) to already be running.
+### Recording while transcribing
 
----
+**Severity:** Low. The engine loop is serial, so a Right Alt press while a
+previous utterance is still transcribing/typing is queued until it
+finishes (the Python version allowed overlap). Acceptable at ~0.5-1 s
+transcription times; revisit if a larger model makes it noticeable.
 
-## Issue 3 — Unknown / unsupported Unicode characters are silently dropped
+### History view renders the newest 200 entries
 
-**Severity:** Medium  
-**Status:** Resolved for the primary path — keysym injection supports
-arbitrary Unicode via the `0x01000000 + codepoint` convention. The uinput
-fallback still drops unmappable characters but now logs them.  
-**File:** `typer.py`
+**Severity:** Low. Rows are laid out in a plain scroll container, capped
+at 200 to keep frames cheap. Switch to GPUI's `list()` with a `ListState`
+for full virtualised scrolling if the full log needs to be browsable.
 
-### Description
+### Model switch peak VRAM
 
-If Whisper produces a character not in `_CHAR_MAP` (accented letters, emoji,
-non-Latin script, currency symbols, etc.) the character is silently skipped:
+**Severity:** Low. `switch_model` loads the new context before dropping
+the old one, so both are briefly resident. Fine for medium <-> small;
+could OOM switching between two large models on a small card.
 
-```python
-entry = _CHAR_MAP.get(ch)
-if entry is None:
-    continue   # ← character vanishes without warning
-```
+### Overlay transparency on X11
 
-`_NORMALIZE` handles a small set of curly quotes and dashes, but nothing else.
-The user gets no indication that part of their dictation was lost.
-
-### Potential fix
-
-Log dropped characters, or fall back to clipboard paste for any text that
-contains unmappable characters.
-
----
-
-## Issue 4 — Whisper server process not restarted on crash
-
-**Severity:** Medium  
-**File:** `transcriber.py:71–73`
-
-### Description
-
-The `_wait_ready` method checks for an unexpected server exit during startup,
-but once the server is running there is no watchdog. If `whisper-server` crashes
-mid-session, subsequent `transcribe()` calls will raise a `ConnectionRefusedError`
-which is not caught, killing the transcription thread silently (daemon thread,
-unhandled exception is printed but the daemon keeps the process alive in a broken
-state).
-
-### Potential fix
-
-Wrap `transcribe()` in a try/except that detects connection failure, respawns the
-server, and retries the request.
-
----
-
-## Issue 5 — Audio frames list not reset on device disconnect/reconnect
-
-**Severity:** Low  
-**File:** `recorder.py` / `main.py:98–99`
-
-### Description
-
-If an evdev keyboard device is lost mid-recording (`OSError` in `_listen_device`),
-the recorder is left in a started state. `recorder.stop()` is never called,
-so `_frames` accumulates audio indefinitely if `start()` is somehow called again,
-and the sounddevice stream leaks.
-
----
-
-## Issue 6 — Single keyboard grab — no device hotplug support
-
-**Severity:** Low  
-**File:** `main.py:114–123`
-
-### Description
-
-`_find_keyboards()` is called once at startup. USB keyboards plugged in after the
-daemon starts, or Bluetooth keyboards that reconnect, are never detected.
-One thread per device is spawned; if a device is lost the thread exits but is
-never replaced.
-
----
-
-## Proposed Priority Order
-
-1. ~~Clipboard paste + save/restore~~ — superseded: Issues 1–3 addressed by
-   Mutter RemoteDesktop keysym injection instead (no clipboard involvement).
-2. ~~Dropped-character logging~~ — done in the uinput fallback path.
-3. **Transcriber watchdog** — prevents silent failures after GPU OOM or server
-   crash (Issue 4).
-4. **Recorder cleanup on device loss** — defensive fix for Issue 5.
-5. **Device hotplug** — quality-of-life improvement for Issue 6.
+**Severity:** Cosmetic. The bubble asks for a transparent window
+background; if the X server / GPUI picks an opaque visual the rounded
+corners show a dark square. Set `window_background` to `Opaque` in
+`src/overlay/mod.rs` if that happens.
