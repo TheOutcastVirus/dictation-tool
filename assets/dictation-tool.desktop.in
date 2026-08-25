@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Dictation
+GenericName=Voice Dictation
+Comment=Hold Right Alt to dictate into the focused window
+Exec=@EXEC@
+Icon=dictation-tool
+Terminal=false
+Categories=Utility;Accessibility;
+Keywords=dictation;speech;voice;transcribe;whisper;
+# Must match the app_id the main window sets, or the shell shows the running
+# window as a second, unnamed launcher entry.
+StartupWMClass=dictation-tool
+StartupNotify=false

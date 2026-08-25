@@ -19,6 +19,9 @@ serde_json = "1"
 dirs = "5"
 crossbeam-channel = "0.5"
 chrono = "0.4"
+# default features would put zbus on tokio; this crate drives zbus::blocking
+# on its async-io default, so match that rather than pull a second runtime.
+ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }
 
 [profile.release]
 debug = false

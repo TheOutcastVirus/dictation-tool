@@ -15,13 +15,14 @@ mod logger;
 mod overlay;
 mod state;
 mod transcribe;
+mod tray;
 mod ui;
 mod vram;
 
 use crossbeam_channel::Receiver;
 use gpui::{prelude::*, App, Application, Entity};
 use state::{AppState, EngineEvent};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 fn main() {
@@ -37,10 +38,12 @@ fn main() {
     };
 
     let repo_root = locate_repo_root();
-    let models_dir = repo_root.join("whisper.cpp").join("models");
+    let models_dir = locate_models_dir(&repo_root);
     if let Ok(exe) = std::env::current_exe() {
         autostart::ensure_unit_installed(&repo_root, &exe);
     }
+
+    let tray_tx = event_tx.clone();
 
     engine::spawn(models_dir.clone(), event_tx, cmd_rx);
 
@@ -49,6 +52,10 @@ fn main() {
     Application::new().run(move |cx: &mut App| {
         let state = cx.new(|_| AppState::new(models_dir, cmd_tx));
         cx.set_global(ui::Windows::default());
+
+        // Held for the life of the process: dropping the handle withdraws
+        // the status icon.
+        let _tray = tray::spawn(tray_tx, icon_theme_path());
 
         overlay::open_anchor(cx);
         ui::show_main(&state, cx);
@@ -85,6 +92,40 @@ fn prefer_x11_backend() {
     if has_x11 && on_wayland {
         std::env::remove_var("WAYLAND_DISPLAY");
     }
+}
+
+/// Where the ggml model files live.
+///
+/// An installed copy keeps them under the XDG data dir, the only location
+/// that survives the checkout being moved or deleted, so that is preferred:
+/// an installed binary launched from a checkout still uses the installed
+/// models. A checkout that was never installed falls back to
+/// `whisper.cpp/models`, where the README's download commands put them.
+fn locate_models_dir(repo_root: &Path) -> PathBuf {
+    if let Some(data) = dirs::data_dir() {
+        let installed = data.join("dictation-tool").join("models");
+        if installed.is_dir() {
+            return installed;
+        }
+    }
+    repo_root.join("whisper.cpp").join("models")
+}
+
+/// Directory prepended to the tray host's icon search path.
+///
+/// Only needed when running from a checkout that has never been installed --
+/// `install.sh` puts the icon in the user's hicolor theme, where the host
+/// finds it unaided, and this returns empty.
+fn icon_theme_path() -> String {
+    if let Ok(exe) = std::env::current_exe() {
+        for dir in exe.ancestors().skip(1) {
+            let icons = dir.join("assets").join("icons");
+            if icons.join("hicolor").is_dir() {
+                return icons.to_string_lossy().into_owned();
+            }
+        }
+    }
+    String::new()
 }
 
 /// The directory containing `whisper.cpp/models`: the working directory
@@ -134,6 +175,8 @@ fn spawn_event_bridge(state: Entity<AppState>, event_rx: Receiver<EngineEvent>, 
                 batch.push(event);
             }
 
+            let quit = batch.iter().any(|e| matches!(e, EngineEvent::Quit));
+
             let alive = cx
                 .update(|cx| {
                     let mut show_window = false;
@@ -148,6 +191,9 @@ fn spawn_event_bridge(state: Entity<AppState>, event_rx: Receiver<EngineEvent>, 
                     overlay::sync(&state, cx);
                     if show_window {
                         ui::show_main(&state, cx);
+                    }
+                    if quit {
+                        cx.quit();
                     }
                 })
                 .is_ok();

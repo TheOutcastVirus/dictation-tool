@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The app's own palette: warm ink ground, bone hardware, and the record light
+  as the only colour, which is the rule the UI follows. Launcher, status icon
+  and window then read as one thing.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="14" fill="#16130f"/>
+  <rect x="25" y="13" width="14" height="25" rx="7" fill="#e2603c"/>
+  <path d="M19 31.5a13 13 0 0 0 26 0"
+        fill="none" stroke="#ede4d6" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M32 44.5v6" stroke="#ede4d6" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M24 50.5h16" stroke="#ede4d6" stroke-width="3.5" stroke-linecap="round"/>
+</svg>

@@ -24,6 +24,9 @@ pub enum EngineEvent {
     Fatal(String),
     /// Another launch of this binary asked us to bring the main window up.
     ShowWindow,
+    /// The status icon's Quit item. Closing the window only hides it; this
+    /// is the one path that actually stops the daemon.
+    Quit,
 }
 
 pub enum EngineCommand {
@@ -158,6 +161,8 @@ impl AppState {
                 self.hold_envelope();
             }
             EngineEvent::ShowWindow => return true,
+            // Acted on by the event bridge, which owns the app handle.
+            EngineEvent::Quit => {}
         }
         false
     }
